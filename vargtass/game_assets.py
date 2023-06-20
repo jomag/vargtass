@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import logging
 import os
 
+import pygame
+
 from .utils import chunks, print_header, print_hex
 
 
@@ -84,19 +86,6 @@ def decompress_carmack(data: bytes):
     return de
 
 
-@dataclass
-class LevelHeader:
-    plane0_offset: int
-    plane1_offset: int
-    plane2_offset: int
-    plane0_len: int
-    plane1_len: int
-    plane2_len: int
-    width: int
-    height: int
-    name: str
-
-
 class Plane:
     width: int
     height: int
@@ -106,6 +95,14 @@ class Plane:
         assert len(map) == width * height * 2
         self.width, self.height = width, height
         self.map = [to_u16(map, i) for i in range(0, len(map), 2)]
+
+    def get_cell(self, x: int, y: int):
+        return self.map[y * self.width + x]
+
+    # Returns true if the given cell is "solid" (wall or similar)
+    def is_solid(self, x: int, y: int):
+        # TODO: 64 is not correct, but it works for now
+        return self.get_cell(x, y) < 64
 
 
 class Plane0(Plane):
@@ -190,6 +187,19 @@ class Plane2(Plane):
             print("".join(to_char(n) for n in row))
 
 
+@dataclass
+class LevelHeader:
+    plane0_offset: int
+    plane1_offset: int
+    plane2_offset: int
+    plane0_len: int
+    plane1_len: int
+    plane2_len: int
+    width: int
+    height: int
+    name: str
+
+
 class Level:
     header: LevelHeader
     plane0: Plane0
@@ -204,9 +214,18 @@ class Level:
         self.plane1 = plane1
         self.plane2 = plane2
 
+    @property
+    def width(self):
+        return self.header.width
+
+    @property
+    def height(self):
+        return self.header.height
+
 
 class Media:
     walls: dict[int, list[int]]
+    wall_surfaces: dict[int, pygame.Surface]
     sprites: dict[int, list[int]]
     sounds: dict[int, int]
 
@@ -249,12 +268,30 @@ class Media:
 
     def __init__(self):
         self.walls = {}
+        self.wall_surfaces = {}
 
     # Adds a wall picture. The data should be the uncompressed image data, palette indexed.
     def add_wall(self, index: int, data: bytes):
         assert len(data) == 64 * 64, "Wall data must be 64x64 pixels"
         w = [self.palette[i] for i in data]
         self.walls[index] = w
+
+    def get_wall_surface(self, index: int):
+        try:
+            return self.wall_surfaces[index]
+        except KeyError:
+            if index not in self.walls:
+                return None
+            wall = self.walls[index]
+            surf = pygame.Surface((64, 64))
+            pxarray = pygame.PixelArray(surf)
+            wall = self.walls[index]
+            for x in range(64):
+                for y in range(64):
+                    pxarray[y, x] = wall[y * 64 + x]  # type: ignore
+            pxarray.close()
+            self.wall_surfaces[index] = surf
+            return surf
 
 
 class GameAssets:

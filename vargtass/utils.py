@@ -1,3 +1,6 @@
+from math import cos, sin
+
+
 def chunks(lst, n):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
@@ -28,3 +31,9 @@ def print_hex(data: bytes):
 
 def print_header(hdr: str, underline: str = "-"):
     print(f"{hdr}\n{underline * len(hdr)}")
+
+
+def rotate(x: float, y: float, angle: float):
+    dx = cos(angle) * x - sin(angle) * y
+    dy = sin(angle) * x + cos(angle) * y
+    return dx, dy

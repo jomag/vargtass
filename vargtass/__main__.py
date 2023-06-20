@@ -11,5 +11,5 @@ if __name__ == "__main__":
     assets = GameAssets()
     assets.load(assets_path)
 
-    # run_game()
-    run_wall_display(assets)
+    run_game(assets)
+    # run_wall_display(assets)
