@@ -1,4 +1,4 @@
-from math import pi, sqrt
+from math import atan, floor, pi, sqrt
 from typing import Optional
 import pygame
 from array import array
@@ -31,63 +31,107 @@ def render_player(screen: pygame.Surface, x: float, y: float, dir: float):
     pygame.draw.polygon(screen, "yellow", poly)
 
 
-def raycast_naive(level: Level, x: float, y: float, dir: float):
-    dist = 0
+def draw_column(
+    screen: pygame.Surface, wall: list[int], x: int, top: int, bottom: int, tx: float
+):
+    assert tx >= 0 and tx < 1.0
+    tx = int(tx * 64)
 
-    while dist < 64:
-        dx, dy = rotate(0, dist, dir)
-        if level.plane0.is_solid(int(x + dx), int(y + dy)):
-            return sqrt(dx * dx + dy * dy)
-        dist += 0.5
+    # pygame.draw.line(screen, "#221100", (x, top), (x, bottom))
+    ty = 0
+    tstep = 64 / (bottom - top)
+    for y in range(top, bottom):
+        # c = 0xFF444444
+        # if tx < 1:
+        #     c = 0xFF0000FF
+        # if tx >= 63:
+        #     c = 0xFF00FF00
+        # if ty < 1:
+        #     c = 0xFFFF0000
+        # if ty >= 63:
+        #     c = 0xFFFF00FF
 
-    return None
+        # screen.set_at((x, y), c)
+
+        screen.set_at((x, y), wall[int(tx) * 64 + int(ty)])
+        ty += tstep
 
 
 def raycast(level: Level, x: float, y: float, dir: float):
+    # ) -> Optional[tuple[float, int, int]]:
+    # Shoot two rays in the same direction. One (vray) is examined at every vertical
+    # intersection with the grid, and the other one (hray) is examined at every horizontal
+    # intersection. The one that hits a wall first is the one we use.
+
     max_distance = 64
 
     # Normalized direction vector
     dx, dy = rotate(0, 1, dir)
 
-    # How far to move along X when moving one unit along Y, and vice versa
-    step_size_x = sqrt(1 + (dy / dx) ** 2)
-    step_size_y = sqrt(1 + (dx / dy) ** 2)
+    x_per_y_unit = dx * (1 / dy) if dy != 0 else 0
+    y_per_x_unit = dy * (1 / dx) if dx != 0 else 0
+
+    # How much longer the ray gets for each unit step along the X axis
+    vray_step_length = sqrt(1 + (dy / dx) ** 2) if dx != 0 else 0
+
+    # How much longer the ray gets for each unit step along the Y axis
+    hray_step_length = sqrt(1 + (dx / dy) ** 2) if dy != 0 else 0
 
     # The current cell we're investigating
-    cell_x = int(x)
-    cell_y = int(y)
-
-    # Accumulated length of ray in X and Y direction
-    ray_length_x = 0
-    ray_length_y = 0
+    # cell_x = int(x)
+    # cell_y = int(y)
 
     if dx < 0:
-        step_x = -1
-        ray_length_x = (x - cell_x) * step_size_x
+        vray_step_x = -1
+        vray_length = (x % 1) * vray_step_length
+        vray_x = floor(x)
+        vray_y = y - (x % 1) * y_per_x_unit
     else:
-        step_x = 1
-        ray_length_x = (cell_x + 1 - x) * step_size_x
+        vray_step_x = 1
+        vray_length = (1.0 - x % 1) * vray_step_length
+        vray_x = floor(x + 1)
+        vray_y = y + (1.0 - x % 1) * y_per_x_unit
 
     if dy < 0:
-        step_y = -1
-        ray_length_y = (y - cell_y) * step_size_y
+        hray_step_y = -1
+        hray_length = (y % 1) * hray_step_length
+        hray_x = x - (y % 1) * x_per_y_unit
+        hray_y = floor(y)
     else:
-        step_y = 1
-        ray_length_y = (cell_y + 1 - y) * step_size_y
+        hray_step_y = 1
+        hray_length = (1.0 - y % 1) * hray_step_length
+        hray_x = x + (1.0 - y % 1) * x_per_y_unit
+        hray_y = floor(y + 1)
 
     distance = 0
+    tx = 0
     while distance < max_distance:
-        if ray_length_x < ray_length_y:
-            cell_x += step_x
-            distance = ray_length_x
-            ray_length_x += step_size_x
+        if vray_length < hray_length:
+            distance = vray_length
+            hit_x, hit_y = vray_x, vray_y
+            cell_y = floor(hit_y)
+            cell_x = floor(hit_x) if dx > 0 else floor(hit_x - 1)
+            wall_index_add = -1
+
+            vray_length += vray_step_length
+            vray_x += vray_step_x
+            vray_y += y_per_x_unit * vray_step_x
+            tx = hit_y % 1
         else:
-            cell_y += step_y
-            distance = ray_length_y
-            ray_length_y += step_size_y
+            distance = hray_length
+            hit_x, hit_y = hray_x, hray_y
+            cell_x = floor(hit_x)
+            cell_y = floor(hit_y) if dy > 0 else floor(hit_y - 1)
+            wall_index_add = -2
+
+            hray_length += hray_step_length
+            hray_x += x_per_y_unit * hray_step_y
+            hray_y += hray_step_y
+            tx = hit_x % 1
 
         if level.plane0.is_solid(cell_x, cell_y):
-            return distance
+            idx = level.plane0.get_cell(cell_x, cell_y) * 2 + wall_index_add
+            return (distance, tx, idx, (hit_x, hit_y))
 
     return None
 
@@ -117,23 +161,61 @@ def render_top_view(
     fov = pi * 0.125
     dir = state.player_dir - fov
     while dir <= state.player_dir + fov:
-        distance = raycast(level, state.player_x, state.player_y, dir) or 64
-        x, y = state.player_x * grid_size, state.player_y * grid_size
-        dx, dy = rotate(0, grid_size, dir)
-        pygame.draw.line(
-            screen,
-            "green",
-            (x, y),
-            (x + dx * distance, y + dy * distance),
-        )
-        dir += fov / 50
+        hit = raycast(level, state.player_x, state.player_y, dir)
+        if hit:
+            distance, tx, _, xy = hit
+            x, y = state.player_x * grid_size, state.player_y * grid_size
+            dx, dy = rotate(0, grid_size, dir)
+            pygame.draw.line(
+                screen,
+                "green",
+                (x, y),
+                (x + dx * distance, y + dy * distance),
+            )
+            pygame.draw.circle(
+                screen, "orange", (xy[0] * grid_size, xy[1] * grid_size), 2
+            )
+        dir += fov / 10
 
     render_player(
         screen,
-        int(state.player_x * grid_size),
-        int(state.player_y * grid_size),
+        floor(state.player_x * grid_size),
+        floor(state.player_y * grid_size),
         state.player_dir,
     )
+
+
+def render_3d(screen: pygame.Surface, state: GameState):
+    level = state.level
+    if not level:
+        return
+
+    wall_indices = set()
+
+    w, h = screen.get_width(), screen.get_height()
+    fov = pi * 0.125
+    step = (fov * 2) / w
+    for x in range(w):
+        dir = state.player_dir - fov + step * x
+        hit = raycast(level, state.player_x, state.player_y, dir) or None
+
+        if hit is not None:
+            dist, tx, wall_index, xy = hit
+            if dist > 0:
+                wh = h / (dist or 1) * 0.5
+                y1 = h / 2 - wh
+                y2 = h / 2 + wh
+                wall_indices.add(wall_index)
+
+                draw_column(
+                    screen,
+                    state.assets.media.walls[wall_index],
+                    x,
+                    floor(y1),
+                    floor(y2),
+                    tx,
+                )
+    print(wall_indices)
 
 
 def run_game(assets: GameAssets):
@@ -142,43 +224,59 @@ def run_game(assets: GameAssets):
     clock = pygame.time.Clock()
     running = True
 
+    move_speed = 0.08
+    rot_speed = 0.02
+
     state = GameState(assets)
     state.enter_level(0)
+    mode = "top"
+
+    if state.level:
+        spawn = state.level.get_player_spawn()
+        state.player_x = spawn[0][0] + 0.5
+        state.player_y = spawn[0][1] + 0.5
+        state.player_dir = (spawn[1] + 180) * pi / 180
 
     while running:
         for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_TAB:
+                    mode = "top" if mode == "3d" else "3d"
             if event.type == pygame.QUIT:
                 running = False
 
-        px, py, pdir = state.player_x, state.player_y, state.player_dir
+        px, py = state.player_x, state.player_y
         level = state.level
 
         pressed = pygame.key.get_pressed()
         if pressed[pygame.K_a]:
-            state.player_dir -= 0.08
+            state.player_dir -= rot_speed
         if pressed[pygame.K_d]:
-            state.player_dir += 0.08
+            state.player_dir += rot_speed
         if pressed[pygame.K_w]:
-            dx, dy = rotate(0, 0.08, state.player_dir)
+            dx, dy = rotate(0, move_speed, state.player_dir)
             state.player_x += dx
             state.player_y += dy
             if level and level.plane0.is_solid(
-                int(state.player_x),
-                int(state.player_y),
+                floor(state.player_x),
+                floor(state.player_y),
             ):
                 state.player_x, state.player_y = px, py
         if pressed[pygame.K_s]:
-            dx, dy = rotate(0, -0.08, state.player_dir)
+            dx, dy = rotate(0, -move_speed, state.player_dir)
             state.player_x += dx
             state.player_y += dy
             if level and level.plane0.is_solid(
-                int(state.player_x),
-                int(state.player_y),
+                floor(state.player_x),
+                floor(state.player_y),
             ):
                 state.player_x, state.player_y = px, py
 
         screen.fill("black")
-        render_top_view(screen, state)
+        if mode == "top":
+            render_top_view(screen, state)
+        else:
+            render_3d(screen, state)
 
         pygame.display.flip()
         clock.tick(60)

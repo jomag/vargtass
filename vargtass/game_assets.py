@@ -222,6 +222,20 @@ class Level:
     def height(self):
         return self.header.height
 
+    # Returns position and direction of the player spawn point
+    def get_player_spawn(self):
+        for y in range(self.height):
+            for x in range(self.width):
+                if self.plane1.get_cell(x, y) == 19:
+                    return (x, y), 0
+                if self.plane1.get_cell(x, y) == 20:
+                    return (x, y), 90
+                if self.plane1.get_cell(x, y) == 21:
+                    return (x, y), 180
+                if self.plane1.get_cell(x, y) == 22:
+                    return (x, y), 270
+        raise Exception("No player spawn point found in map")
+
 
 class Media:
     walls: dict[int, list[int]]
