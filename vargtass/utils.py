@@ -1,4 +1,4 @@
-from math import cos, sin
+from math import cos, pi, sin
 
 
 def chunks(lst, n):
@@ -37,3 +37,7 @@ def rotate(x: float, y: float, angle: float):
     dx = cos(angle) * x - sin(angle) * y
     dy = sin(angle) * x + cos(angle) * y
     return dx, dy
+
+
+def d2r(degrees: float):
+    return degrees * (pi / 180.0)

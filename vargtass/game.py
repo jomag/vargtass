@@ -1,9 +1,9 @@
-from math import atan, floor, pi, sqrt
-from typing import Optional
+from math import atan, cos, floor, pi, sin, sqrt
+from typing import Optional, Tuple
 import pygame
 from array import array
 
-from vargtass.utils import chunks, rotate
+from vargtass.utils import chunks, d2r, rotate
 
 from .game_assets import GameAssets, Level
 
@@ -40,7 +40,12 @@ def draw_column(
     # pygame.draw.line(screen, "#221100", (x, top), (x, bottom))
     ty = 0
     tstep = 64 / (bottom - top)
-    for y in range(top, bottom):
+
+    if top < 0:
+        ty += tstep * -top
+        top = 0
+
+    for y in range(top, min(bottom, screen.get_height())):
         # c = 0xFF444444
         # if tx < 1:
         #     c = 0xFF0000FF
@@ -136,11 +141,18 @@ def raycast(level: Level, x: float, y: float, dir: float):
     return None
 
 
+def projected_distance(dx: float, dy: float, angle: float):
+    angle += pi * 0.5
+    return dx * cos(angle) + dy * sin(angle)
+
+
 def render_top_view(
-    screen: pygame.Surface,
-    state: GameState,
+    screen: pygame.Surface, state: GameState, center: Tuple[float, float] = (0, 0)
 ):
     grid_size = 16
+    w, h = screen.get_size()
+    cx, cy = center[0] * grid_size, center[1] * grid_size
+    offs_x, offs_y = w / 2 - cx, h / 2 - cy
 
     level = state.level
     if not level:
@@ -156,7 +168,10 @@ def render_top_view(
                 if surf:
                     if grid_size != 64:
                         surf = pygame.transform.scale(surf, (grid_size, grid_size))
-                    screen.blit(surf, (x * grid_size, y * grid_size))
+                    screen.blit(
+                        surf,
+                        (x * grid_size + offs_x, y * grid_size + offs_y),
+                    )
 
     fov = pi * 0.125
     dir = state.player_dir - fov
@@ -169,18 +184,21 @@ def render_top_view(
             pygame.draw.line(
                 screen,
                 "green",
-                (x, y),
-                (x + dx * distance, y + dy * distance),
+                (x + offs_x, y + offs_y),
+                (x + dx * distance + offs_x, y + dy * distance + offs_y),
             )
             pygame.draw.circle(
-                screen, "orange", (xy[0] * grid_size, xy[1] * grid_size), 2
+                screen,
+                "orange",
+                (xy[0] * grid_size + offs_x, xy[1] * grid_size + offs_y),
+                2,
             )
         dir += fov / 10
 
     render_player(
         screen,
-        floor(state.player_x * grid_size),
-        floor(state.player_y * grid_size),
+        floor(state.player_x * grid_size) + offs_x,
+        floor(state.player_y * grid_size) + offs_y,
         state.player_dir,
     )
 
@@ -189,8 +207,6 @@ def render_3d(screen: pygame.Surface, state: GameState):
     level = state.level
     if not level:
         return
-
-    wall_indices = set()
 
     w, h = screen.get_width(), screen.get_height()
     fov = pi * 0.125
@@ -201,11 +217,16 @@ def render_3d(screen: pygame.Surface, state: GameState):
 
         if hit is not None:
             dist, tx, wall_index, xy = hit
-            if dist > 0:
-                wh = h / (dist or 1) * 0.5
+            pdist = projected_distance(
+                xy[0] - state.player_x,
+                xy[1] - state.player_y,
+                state.player_dir,
+            )
+
+            if pdist > 0:
+                wh = h / (pdist or 1) * 0.5
                 y1 = h / 2 - wh
                 y2 = h / 2 + wh
-                wall_indices.add(wall_index)
 
                 draw_column(
                     screen,
@@ -215,12 +236,17 @@ def render_3d(screen: pygame.Surface, state: GameState):
                     floor(y2),
                     tx,
                 )
-    print(wall_indices)
 
 
 def run_game(assets: GameAssets):
+    width = 512
+    height = 512
+
+    floor_color = 0x707070
+    ceil_color = 0x383838
+
     pygame.init()
-    screen = pygame.display.set_mode((1024, 1024))
+    screen = pygame.display.set_mode((width, height))
     clock = pygame.time.Clock()
     running = True
 
@@ -255,26 +281,32 @@ def run_game(assets: GameAssets):
             state.player_dir += rot_speed
         if pressed[pygame.K_w]:
             dx, dy = rotate(0, move_speed, state.player_dir)
-            state.player_x += dx
-            state.player_y += dy
-            if level and level.plane0.is_solid(
-                floor(state.player_x),
-                floor(state.player_y),
-            ):
-                state.player_x, state.player_y = px, py
+            if level:
+                if not level.plane0.is_solid(
+                    int(state.player_x + dx), int(state.player_y)
+                ):
+                    state.player_x += dx
+                if not level.plane0.is_solid(
+                    int(state.player_x), int(state.player_y + dy)
+                ):
+                    state.player_y += dy
         if pressed[pygame.K_s]:
             dx, dy = rotate(0, -move_speed, state.player_dir)
-            state.player_x += dx
-            state.player_y += dy
-            if level and level.plane0.is_solid(
-                floor(state.player_x),
-                floor(state.player_y),
-            ):
-                state.player_x, state.player_y = px, py
+            if level:
+                if not level.plane0.is_solid(
+                    int(state.player_x + dx), int(state.player_y)
+                ):
+                    state.player_x += dx
+                if not level.plane0.is_solid(
+                    int(state.player_x), int(state.player_y + dy)
+                ):
+                    state.player_y += dy
 
-        screen.fill("black")
+        screen.fill(ceil_color, (0, 0, width, height // 2))
+        screen.fill(floor_color, (0, height // 2, width, height // 2))
+
         if mode == "top":
-            render_top_view(screen, state)
+            render_top_view(screen, state, (state.player_x, state.player_y))
         else:
             render_3d(screen, state)
 
