@@ -86,6 +86,10 @@ def decompress_carmack(data: bytes):
     return de
 
 
+DOOR_HORIZONTAL = 0
+DOOR_VERTICAL = 1
+
+
 class Plane:
     width: int
     height: int
@@ -99,10 +103,21 @@ class Plane:
     def get_cell(self, x: int, y: int):
         return self.map[y * self.width + x]
 
+    def get_door_orientation(self, x: int, y: int):
+        n = self.get_cell(x, y)
+        if n == 90 or n == 91:
+            return DOOR_HORIZONTAL
+        if n == 92 or n == 93:
+            return DOOR_VERTICAL
+        return None
+
     # Returns true if the given cell is "solid" (wall or similar)
     def is_solid(self, x: int, y: int):
-        # TODO: 64 is not correct, but it works for now
         return self.get_cell(x, y) < 64
+
+    def is_door(self, x: int, y: int):
+        n = self.get_cell(x, y)
+        return (n >= 90 and n <= 95) or n == 100 or n == 101
 
 
 class Plane0(Plane):
@@ -221,6 +236,15 @@ class Level:
     @property
     def height(self):
         return self.header.height
+
+    def is_solid(self, x, y):
+        return self.plane0.is_solid(x, y)
+
+    def is_door(self, x, y):
+        return self.plane1.is_door(x, y)
+
+    def get_wall(self, x, y):
+        return self.plane0.get_cell(x, y)
 
     # Returns position and direction of the player spawn point
     def get_player_spawn(self):

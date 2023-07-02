@@ -1,5 +1,6 @@
 import logging
 import os
+
 from .game_assets import GameAssets
 from .game import run_game, run_wall_display
 

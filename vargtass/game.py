@@ -2,6 +2,7 @@ from math import atan, cos, floor, pi, sin, sqrt
 from typing import Optional, Tuple
 import pygame
 from array import array
+from vargtass.raycaster import Raycaster
 
 from vargtass.utils import chunks, d2r, rotate
 
@@ -62,7 +63,7 @@ def draw_column(
         ty += tstep
 
 
-def raycast(level: Level, x: float, y: float, dir: float):
+def xraycast(level: Level, x: float, y: float, dir: float):
     # ) -> Optional[tuple[float, int, int]]:
     # Shoot two rays in the same direction. One (vray) is examined at every vertical
     # intersection with the grid, and the other one (hray) is examined at every horizontal
@@ -114,8 +115,9 @@ def raycast(level: Level, x: float, y: float, dir: float):
         if vray_length < hray_length:
             distance = vray_length
             hit_x, hit_y = vray_x, vray_y
-            cell_y = floor(hit_y)
+            ray = "vray"
             cell_x = floor(hit_x) if dx > 0 else floor(hit_x - 1)
+            cell_y = floor(hit_y)
             wall_index_add = -1
 
             vray_length += vray_step_length
@@ -125,6 +127,7 @@ def raycast(level: Level, x: float, y: float, dir: float):
         else:
             distance = hray_length
             hit_x, hit_y = hray_x, hray_y
+            ray = "hray"
             cell_x = floor(hit_x)
             cell_y = floor(hit_y) if dy > 0 else floor(hit_y - 1)
             wall_index_add = -2
@@ -137,6 +140,16 @@ def raycast(level: Level, x: float, y: float, dir: float):
         if level.plane0.is_solid(cell_x, cell_y):
             idx = level.plane0.get_cell(cell_x, cell_y) * 2 + wall_index_add
             return (distance, tx, idx, (hit_x, hit_y))
+
+        if level.plane0.is_door(cell_x, cell_y):
+            orientation = level.plane0.get_door_orientation(cell_x, cell_y)
+            # if (hit_x + x_per_y_unit * hray_step_y / 2) % 1.0 < 0.5:
+            return (
+                distance + hray_step_length / 2,
+                tx,
+                100 + wall_index_add,
+                (hit_x + 1 / 2, hit_y + hray_step_y / 2),
+            )
 
     return None
 
@@ -173,10 +186,12 @@ def render_top_view(
                         (x * grid_size + offs_x, y * grid_size + offs_y),
                     )
 
+    raycaster = Raycaster()
+
     fov = pi * 0.125
     dir = state.player_dir - fov
     while dir <= state.player_dir + fov:
-        hit = raycast(level, state.player_x, state.player_y, dir)
+        hit = raycaster.raycast(level, state.player_x, state.player_y, dir)
         if hit:
             distance, tx, _, xy = hit
             x, y = state.player_x * grid_size, state.player_y * grid_size
@@ -208,12 +223,13 @@ def render_3d(screen: pygame.Surface, state: GameState):
     if not level:
         return
 
+    raycaster = Raycaster()
     w, h = screen.get_width(), screen.get_height()
     fov = pi * 0.125
     step = (fov * 2) / w
     for x in range(w):
         dir = state.player_dir - fov + step * x
-        hit = raycast(level, state.player_x, state.player_y, dir) or None
+        hit = raycaster.raycast(level, state.player_x, state.player_y, dir) or None
 
         if hit is not None:
             dist, tx, wall_index, xy = hit
