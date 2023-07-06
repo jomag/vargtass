@@ -1,4 +1,5 @@
 from math import floor, sqrt
+from vargtass.game_state import GameState
 from vargtass.game_assets import Level
 from vargtass.utils import rotate
 
@@ -17,19 +18,19 @@ class Raycaster:
     # State for testing horizontal walls
     hray_step_length: float
     hray_step_x: float
-    hray_step_y: float
+    hray_step_y: int
     hray_x: float
     hray_y: float
 
     # State for testing vertical walls
     vray_step_length: float
-    vray_step_x: float
+    vray_step_x: int
     vray_step_y: float
     vray_x: float
     vray_y: float
 
     def _prepare(self):
-        """Prepare for new raycast"""
+        """Prepare for casting next ray"""
         x, y = self.x, self.y
 
         # Normalized direction vector
@@ -68,11 +69,13 @@ class Raycaster:
 
     def raycast(
         self,
+        state: GameState,
         level: Level,
         x: float,
         y: float,
         dir: float,
         max_distance: float = 64,
+        door_is_solid: bool = False,  # Quick hack to allow raycasting for doors
     ):
         # Shoot two rays in the same direction. One (vray) is examined at every vertical
         # intersection with the grid, and the other one (hray) is examined at every horizontal
@@ -87,40 +90,82 @@ class Raycaster:
             if self.vray_length < self.hray_length:
                 distance = self.vray_length
                 hit_x, hit_y = self.vray_x, self.vray_y
-                ray = "vray"
                 cell_x = floor(hit_x) if self.vray_step_x > 0 else floor(hit_x - 1)
                 cell_y = floor(hit_y)
                 wall_index_add = -1
 
+                tile = level.tiles[cell_y][cell_x]
+
+                if tile.is_solid or (tile.is_door and door_is_solid):
+                    if self.vray_step_x > 0:
+                        texture = tile.get_texture_west()
+                    else:
+                        texture = tile.get_texture_east()
+
+                    tx = hit_y % 1
+                    return (distance, tx, texture, (hit_x, hit_y), tile)
+
+                if tile.is_door:
+                    door_hit_x = hit_x + self.vray_step_x / 2
+                    door_hit = (
+                        hit_y + (self.vray_step_y * self.vray_step_x) / 2
+                    ) - cell_y
+
+                    if door_hit >= 0 and door_hit < 1:
+                        door_position = state.get_door_position(tile.door_id)
+                        door_hit_y = hit_y + (self.vray_step_x * self.vray_step_y) / 2
+                        tx = (door_position - door_hit) % 1
+                        if (door_hit) < door_position:
+                            return (
+                                self.vray_length + self.vray_step_length / 2,
+                                tx,
+                                100 + wall_index_add,
+                                (door_hit_x, door_hit_y),
+                                tile,
+                            )
+
                 self.vray_length += self.vray_step_length
                 self.vray_x += self.vray_step_x
                 self.vray_y += self.vray_step_y * self.vray_step_x
-                tx = hit_y % 1
             else:
                 distance = self.hray_length
                 hit_x, hit_y = self.hray_x, self.hray_y
-                ray = "hray"
                 cell_x = floor(hit_x)
                 cell_y = floor(hit_y) if self.hray_step_y > 0 else floor(hit_y - 1)
                 wall_index_add = -2
 
+                tile = level.tiles[cell_y][cell_x]
+
+                if tile.is_solid or (tile.is_door and door_is_solid):
+                    if self.hray_step_y > 0:
+                        texture = tile.get_texture_north()
+                    else:
+                        texture = tile.get_texture_south()
+
+                    tx = hit_x % 1
+                    return (distance, tx, texture, (hit_x, hit_y), tile)
+
+                if tile.is_door:
+                    door_hit_y = hit_y + self.hray_step_y / 2
+                    door_hit = (
+                        hit_x + (self.hray_step_y * self.hray_step_x) / 2
+                    ) - cell_x
+
+                    if door_hit >= 0 and door_hit < 1:
+                        door_position = state.get_door_position(tile.door_id)
+                        door_hit_x = hit_x + (self.hray_step_y * self.hray_step_x) / 2
+                        tx = (door_position - door_hit) % 1
+                        if (door_hit) < door_position:
+                            return (
+                                self.hray_length + self.hray_step_length / 2,
+                                tx,
+                                100 + wall_index_add,
+                                (door_hit_x, door_hit_y),
+                                tile,
+                            )
+
                 self.hray_length += self.hray_step_length
                 self.hray_x += self.hray_step_x * self.hray_step_y
                 self.hray_y += self.hray_step_y
-                tx = hit_x % 1
-
-            if level.plane0.is_solid(cell_x, cell_y):
-                idx = level.plane0.get_cell(cell_x, cell_y) * 2 + wall_index_add
-                return (distance, tx, idx, (hit_x, hit_y))
-
-            if level.plane0.is_door(cell_x, cell_y):
-                orientation = level.plane0.get_door_orientation(cell_x, cell_y)
-                # if (hit_x + x_per_y_unit * hray_step_y / 2) % 1.0 < 0.5:
-                return (
-                    distance + self.hray_step_length / 2,
-                    tx,
-                    100 + wall_index_add,
-                    (hit_x + 1 / 2, hit_y + self.hray_step_y / 2),
-                )
 
         return None
