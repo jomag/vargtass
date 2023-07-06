@@ -1,14 +1,7 @@
-# References:
-#
-# "Wolfenstein 3D game file specifications"
-# https://vpoupet.github.io/wolfenstein/docs/files.html
-#
-# ModdingWiki:
-# https://moddingwiki.shikadi.net/wiki/GameMaps_Format
-
 from dataclasses import dataclass
 import logging
 import os
+from typing import List
 
 import pygame
 
@@ -86,6 +79,10 @@ def decompress_carmack(data: bytes):
     return de
 
 
+DOOR_HORIZONTAL = 0
+DOOR_VERTICAL = 1
+
+
 class Plane:
     width: int
     height: int
@@ -99,10 +96,21 @@ class Plane:
     def get_cell(self, x: int, y: int):
         return self.map[y * self.width + x]
 
+    def get_door_orientation(self, x: int, y: int):
+        n = self.get_cell(x, y)
+        if n == 90 or n == 91:
+            return DOOR_HORIZONTAL
+        if n == 92 or n == 93:
+            return DOOR_VERTICAL
+        return None
+
     # Returns true if the given cell is "solid" (wall or similar)
     def is_solid(self, x: int, y: int):
-        # TODO: 64 is not correct, but it works for now
         return self.get_cell(x, y) < 64
+
+    def is_door(self, x: int, y: int):
+        n = self.get_cell(x, y)
+        return (n >= 90 and n <= 95) or n == 100 or n == 101
 
 
 class Plane0(Plane):
@@ -200,19 +208,106 @@ class LevelHeader:
     name: str
 
 
+class Tile:
+    # True if this tile is a wall tile. Note that doors are not solid.
+    is_solid: bool
+
+    # True if this tile is a door
+    is_door: bool
+
+    # Door id for lookup tables
+    door_id: int
+
+    # Plane 0, 1, 2 value for this tile
+    p0: int
+    p1: int
+    p2: int
+
+    # True if there is an adjacent door (north, east, south, west)
+    adj_door: List[bool]
+
+    # Texture index (north, east, south, west)
+    texture: List[int]
+
+    def __init__(self, p0: int, p1: int, p2: int):
+        self.p0, self.p1, self.p2 = p0, p1, p2
+        self.is_solid = p0 < 64
+        self.is_door = (p0 >= 90 and p0 <= 95) or p0 == 100 or p0 == 101
+        self.adj_door = [False, False, False, False]
+
+    def freeze(self):
+        self.textures = [
+            101 if self.adj_door[0] else self.p0 * 2 - 1,
+            100 if self.adj_door[1] else self.p0 * 2 - 2,
+            101 if self.adj_door[2] else self.p0 * 2 - 1,
+            100 if self.adj_door[3] else self.p0 * 2 - 2,
+        ]
+
+    def get_texture_north(self):
+        return self.textures[0]
+
+    def get_texture_south(self):
+        return self.textures[2]
+
+    def get_texture_east(self):
+        return self.textures[1]
+
+    def get_texture_west(self):
+        return self.textures[3]
+
+
 class Level:
     header: LevelHeader
     plane0: Plane0
     plane1: Plane1
     plane2: Plane2
+    tiles: List[List[Tile]]
 
     def __init__(
-        self, header: LevelHeader, plane0: Plane0, plane1: Plane1, plane2: Plane2
+        self,
+        header: LevelHeader,
+        plane0: Plane0,
+        plane1: Plane1,
+        plane2: Plane2,
     ):
         self.header = header
         self.plane0 = plane0
         self.plane1 = plane1
         self.plane2 = plane2
+        self._preprocess()
+
+    def _preprocess(self):
+        self.tiles = [
+            [
+                Tile(
+                    p0=self.plane0.get_cell(x, y),
+                    p1=self.plane1.get_cell(x, y),
+                    p2=self.plane2.get_cell(x, y),
+                )
+                for x in range(self.width)
+            ]
+            for y in range(self.height)
+        ]
+
+        door_index = 0
+
+        for y in range(self.height):
+            for x in range(self.width):
+                if self.tiles[y][x].is_door:
+                    self.tiles[y][x].door_id = door_index
+                    door_index += 1
+                    if y < self.height - 1:
+                        self.tiles[y + 1][x].adj_door[0] = True
+                    if x > 0:
+                        self.tiles[y][x - 1].adj_door[1] = True
+                    if y > 0:
+                        self.tiles[y - 1][x].adj_door[2] = True
+                    if x < self.width - 1:
+                        self.tiles[y][x + 1].adj_door[3] = True
+
+        for y in range(self.height):
+            for x in range(self.width):
+                self.tiles[y][x].freeze()
 
     @property
     def width(self):
@@ -221,6 +316,15 @@ class Level:
     @property
     def height(self):
         return self.header.height
+
+    def is_solid(self, x, y):
+        return self.tiles[y][x].is_solid
+
+    def is_door(self, x, y):
+        return self.tiles[y][x].is_door
+
+    def get_wall(self, x, y):
+        return self.plane0.get_cell(x, y)
 
     # Returns position and direction of the player spawn point
     def get_player_spawn(self):

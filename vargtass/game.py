@@ -1,26 +1,13 @@
 from math import atan, cos, floor, pi, sin, sqrt
-from typing import Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 import pygame
 from array import array
+from vargtass.game_state import GameState
+from vargtass.raycaster import Raycaster
 
 from vargtass.utils import chunks, d2r, rotate
 
 from .game_assets import GameAssets, Level
-
-
-class GameState:
-    player_x: float = 32
-    player_y: float = 32
-    player_dir: float = 0.0
-    level_no: int = 0
-    level: Optional[Level] = None
-
-    def __init__(self, assets: GameAssets):
-        self.assets = assets
-
-    def enter_level(self, level_no: int):
-        self.level_no = level_no
-        self.level = self.assets.load_level(level_no)
 
 
 def render_player(screen: pygame.Surface, x: float, y: float, dir: float):
@@ -114,8 +101,9 @@ def raycast(level: Level, x: float, y: float, dir: float):
         if vray_length < hray_length:
             distance = vray_length
             hit_x, hit_y = vray_x, vray_y
-            cell_y = floor(hit_y)
+            ray = "vray"
             cell_x = floor(hit_x) if dx > 0 else floor(hit_x - 1)
+            cell_y = floor(hit_y)
             wall_index_add = -1
 
             vray_length += vray_step_length
@@ -125,6 +113,7 @@ def raycast(level: Level, x: float, y: float, dir: float):
         else:
             distance = hray_length
             hit_x, hit_y = hray_x, hray_y
+            ray = "hray"
             cell_x = floor(hit_x)
             cell_y = floor(hit_y) if dy > 0 else floor(hit_y - 1)
             wall_index_add = -2
@@ -138,6 +127,16 @@ def raycast(level: Level, x: float, y: float, dir: float):
             idx = level.plane0.get_cell(cell_x, cell_y) * 2 + wall_index_add
             return (distance, tx, idx, (hit_x, hit_y))
 
+        if level.plane0.is_door(cell_x, cell_y):
+            orientation = level.plane0.get_door_orientation(cell_x, cell_y)
+            # if (hit_x + x_per_y_unit * hray_step_y / 2) % 1.0 < 0.5:
+            return (
+                distance + hray_step_length / 2,
+                tx,
+                100 + wall_index_add,
+                (hit_x + 1 / 2, hit_y + hray_step_y / 2),
+            )
+
     return None
 
 
@@ -149,7 +148,7 @@ def projected_distance(dx: float, dy: float, angle: float):
 def render_top_view(
     screen: pygame.Surface, state: GameState, center: Tuple[float, float] = (0, 0)
 ):
-    grid_size = 16
+    grid_size = 64
     w, h = screen.get_size()
     cx, cy = center[0] * grid_size, center[1] * grid_size
     offs_x, offs_y = w / 2 - cx, h / 2 - cy
@@ -162,7 +161,7 @@ def render_top_view(
 
     for x in range(level.width):
         for y in range(level.height):
-            wall_index = level.plane0.get_cell(x, y)
+            wall_index = level.plane0.get_cell(x, y) * 2 - 2
             if wall_index <= 256:
                 surf = media.get_wall_surface(wall_index)
                 if surf:
@@ -173,12 +172,14 @@ def render_top_view(
                         (x * grid_size + offs_x, y * grid_size + offs_y),
                     )
 
+    raycaster = Raycaster()
+
     fov = pi * 0.125
     dir = state.player_dir - fov
     while dir <= state.player_dir + fov:
-        hit = raycast(level, state.player_x, state.player_y, dir)
+        hit = raycaster.raycast(state, level, state.player_x, state.player_y, dir)
         if hit:
-            distance, tx, _, xy = hit
+            distance, tx, _, xy, tile = hit
             x, y = state.player_x * grid_size, state.player_y * grid_size
             dx, dy = rotate(0, grid_size, dir)
             pygame.draw.line(
@@ -208,15 +209,18 @@ def render_3d(screen: pygame.Surface, state: GameState):
     if not level:
         return
 
+    raycaster = Raycaster()
     w, h = screen.get_width(), screen.get_height()
     fov = pi * 0.125
     step = (fov * 2) / w
     for x in range(w):
         dir = state.player_dir - fov + step * x
-        hit = raycast(level, state.player_x, state.player_y, dir) or None
+        hit = (
+            raycaster.raycast(state, level, state.player_x, state.player_y, dir) or None
+        )
 
         if hit is not None:
-            dist, tx, wall_index, xy = hit
+            dist, tx, wall_index, xy, tile = hit
             pdist = projected_distance(
                 xy[0] - state.player_x,
                 xy[1] - state.player_y,
@@ -263,11 +267,41 @@ def run_game(assets: GameAssets):
         state.player_y = spawn[0][1] + 0.5
         state.player_dir = (spawn[1] + 180) * pi / 180
 
+    def handle_door_trigger():
+        level = state.level
+        if level:
+            rc = Raycaster()
+            hit = rc.raycast(
+                state,
+                level,
+                state.player_x,
+                state.player_y,
+                state.player_dir,
+                door_is_solid=True,
+            )
+            if hit:
+                _, _, _, _, tile = hit
+                if tile.is_door:
+                    state.toggle_door(tile.door_id)
+
     while running:
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_TAB:
                     mode = "top" if mode == "3d" else "3d"
+                if event.key == pygame.K_t:
+                    level = state.level
+                    if level is not None:
+                        rc = Raycaster()
+                        rc.raycast(
+                            state,
+                            level,
+                            state.player_x,
+                            state.player_y,
+                            state.player_dir,
+                        )
+                if event.key == pygame.K_SPACE:
+                    handle_door_trigger()
             if event.type == pygame.QUIT:
                 running = False
 
@@ -282,24 +316,16 @@ def run_game(assets: GameAssets):
         if pressed[pygame.K_w]:
             dx, dy = rotate(0, move_speed, state.player_dir)
             if level:
-                if not level.plane0.is_solid(
-                    int(state.player_x + dx), int(state.player_y)
-                ):
+                if state.is_walkable(int(state.player_x + dx), int(state.player_y)):
                     state.player_x += dx
-                if not level.plane0.is_solid(
-                    int(state.player_x), int(state.player_y + dy)
-                ):
+                if state.is_walkable(int(state.player_x), int(state.player_y + dy)):
                     state.player_y += dy
         if pressed[pygame.K_s]:
             dx, dy = rotate(0, -move_speed, state.player_dir)
             if level:
-                if not level.plane0.is_solid(
-                    int(state.player_x + dx), int(state.player_y)
-                ):
+                if state.is_walkable(int(state.player_x + dx), int(state.player_y)):
                     state.player_x += dx
-                if not level.plane0.is_solid(
-                    int(state.player_x), int(state.player_y + dy)
-                ):
+                if state.is_walkable(int(state.player_x), int(state.player_y + dy)):
                     state.player_y += dy
 
         screen.fill(ceil_color, (0, 0, width, height // 2))
@@ -311,6 +337,7 @@ def run_game(assets: GameAssets):
             render_3d(screen, state)
 
         pygame.display.flip()
+        state.step()
         clock.tick(60)
 
     pygame.quit()
@@ -325,8 +352,6 @@ def run_wall_display(assets: GameAssets):
     screen = pygame.display.set_mode((per_row * (64 + 10) + 10, rows * (64 + 10) + 10))
     clock = pygame.time.Clock()
     running = True
-
-    screen.fill("purple")
 
     for i, idx in enumerate(assets.media.walls):
         wall = assets.media.get_wall_surface(idx)
