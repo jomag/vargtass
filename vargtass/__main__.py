@@ -2,7 +2,7 @@ import logging
 import os
 
 from .game_assets import GameAssets
-from .game import run_game, run_wall_display
+from .game import run_game, run_sprite_display, run_wall_display
 
 if __name__ == "__main__":
     logging.basicConfig()
@@ -14,3 +14,4 @@ if __name__ == "__main__":
 
     run_game(assets)
     # run_wall_display(assets)
+    # run_sprite_display(assets)

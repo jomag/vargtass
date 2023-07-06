@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import logging
 import os
-from typing import List
+from typing import List, Tuple
 
 import pygame
 
@@ -341,10 +341,65 @@ class Level:
         raise Exception("No player spawn point found in map")
 
 
+class Sprite:
+    first_col: int
+    last_col: int
+    pixel_pool_raw: bytes
+    pixel_pool: List[int]
+    column_posts: List[List[Tuple[int, int]]]
+
+    def __init__(self):
+        self.pixel_pool = []
+        self.column_posts = []
+
+    @classmethod
+    def load(cls, data: bytes, palette: List[int]):
+        spr = Sprite()
+
+        # First and last column containing non-empty pixels
+        spr.first_col = to_u16(data, 0)
+        spr.last_col = to_u16(data, 2)
+
+        # Offset into the posts data for each non-empty column
+        col_offsets = [
+            to_u16(data, 4 + n * 2) for n in range(spr.last_col - spr.first_col + 1)
+        ]
+        pool_offset = 4 + (spr.last_col - spr.first_col + 1) * 2
+        spr.pixel_pool_raw = data[pool_offset:]
+        spr.pixel_pool = [palette[idx] for idx in spr.pixel_pool_raw]
+
+        for post_offset in col_offsets:
+            n = 0
+            posts = []
+            while True:
+                last_row = to_u16(data, post_offset + n)
+                if last_row == 0:
+                    break
+                # Note that the middle u16 between last_row and first_row is ignored.
+                first_row = to_u16(data, post_offset + n + 4)
+                posts.append((first_row // 2, last_row // 2))
+                n += 6
+            spr.column_posts.append(posts)
+
+        return spr
+
+    def to_surface(self):
+        surf = pygame.Surface((64, 64))
+        pxarray = pygame.PixelArray(surf)
+        pix = 0
+        for x, col in enumerate(self.column_posts):
+            for first_row, last_row in col:
+                for y in range(first_row, last_row):
+                    pxarray[self.first_col + x, y] = self.pixel_pool[pix]  # type: ignore
+                    pix += 1
+        pxarray.close()
+        return surf
+
+
 class Media:
     walls: dict[int, list[int]]
     wall_surfaces: dict[int, pygame.Surface]
-    sprites: dict[int, list[int]]
+    sprites: dict[int, Sprite]
     sounds: dict[int, int]
 
     # fmt: off
@@ -387,12 +442,16 @@ class Media:
     def __init__(self):
         self.walls = {}
         self.wall_surfaces = {}
+        self.sprites = {}
 
     # Adds a wall picture. The data should be the uncompressed image data, palette indexed.
     def add_wall(self, index: int, data: bytes):
         assert len(data) == 64 * 64, "Wall data must be 64x64 pixels"
         w = [self.palette[i] for i in data]
         self.walls[index] = w
+
+    def add_sprite(self, index: int, spr: Sprite):
+        self.sprites[index] = spr
 
     def get_wall_surface(self, index: int):
         try:
@@ -410,6 +469,12 @@ class Media:
             pxarray.close()
             self.wall_surfaces[index] = surf
             return surf
+
+    def get_sprite_surface(self, index: int):
+        try:
+            return self.sprites[index].to_surface()
+        except KeyError:
+            return None
 
 
 class GameAssets:
@@ -452,6 +517,15 @@ class GameAssets:
         for i in range(first_sprite):
             if lengths[i] > 0:
                 self.media.add_wall(i, data[offsets[i] : offsets[i] + lengths[i]])
+
+        for i in range(first_sprite, first_sound):
+            if lengths[i] > 0:
+                self.media.add_sprite(
+                    i - first_sprite,
+                    Sprite.load(
+                        data[offsets[i] : offsets[i] + lengths[i]], self.media.palette
+                    ),
+                )
 
     def load_level(self, level: int):
         o = self.level_offsets[level]

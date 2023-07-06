@@ -368,3 +368,49 @@ def run_wall_display(assets: GameAssets):
                 running = False
         clock.tick(60)
     pygame.quit()
+
+
+def run_sprite_display(assets: GameAssets):
+    pygame.init()
+
+    margin = 16
+    w, h = 512, 512
+
+    screen = pygame.display.set_mode((w + margin * 2, h + margin * 2))
+    clock = pygame.time.Clock()
+    running = True
+
+    # for i, idx in enumerate(assets.media.walls):
+    #     wall = assets.media.get_wall_surface(idx)
+    #     if wall:
+    #         x = i % per_row
+    #         y = i // per_row
+    #         screen.blit(wall, (x * 74 + 10, y * 74 + 10))
+
+    sprite_index = 0
+
+    def render_sprite(index):
+        screen.fill("black")
+
+        sprite = assets.media.get_sprite_surface(index)
+        if sprite:
+            scaled = pygame.transform.scale(sprite, (512, 512))
+            screen.blit(scaled, (margin, margin, w, h))
+
+        pygame.display.flip()
+
+    render_sprite(sprite_index)
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RIGHT:
+                    sprite_index += 1
+                    render_sprite(sprite_index)
+                if event.key == pygame.K_LEFT:
+                    sprite_index -= 1
+                    render_sprite(sprite_index)
+            if event.type == pygame.QUIT:
+                running = False
+        clock.tick(60)
+    pygame.quit()
