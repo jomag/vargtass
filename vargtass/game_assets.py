@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 import logging
 import os
-from typing import List, Tuple
+import time
+from typing import List, Optional, Tuple
 
 import pygame
 
@@ -342,19 +343,26 @@ class Level:
 
 
 class Sprite:
+    width: int
+    height: int
     first_col: int
     last_col: int
     pixel_pool_raw: bytes
     pixel_pool: List[int]
     column_posts: List[List[Tuple[int, int]]]
 
-    def __init__(self):
+    # Non-optimized columns with one value for every pixel,
+    # and None for transparent pixels
+    column_pixels: List[int]
+
+    def __init__(self, width: int, height: int):
+        self.width, self.height = width, height
         self.pixel_pool = []
         self.column_posts = []
 
     @classmethod
     def load(cls, data: bytes, palette: List[int]):
-        spr = Sprite()
+        spr = Sprite(64, 64)
 
         # First and last column containing non-empty pixels
         spr.first_col = to_u16(data, 0)
@@ -381,9 +389,21 @@ class Sprite:
                 n += 6
             spr.column_posts.append(posts)
 
+        spr._generate_column_pixels()
         return spr
 
-    def to_surface(self):
+    def _generate_column_pixels(self):
+        self.column_pixels: List[List[Optional[int]]] = []
+        pix = 0
+        for col in self.column_posts:
+            pixels: List[Optional[int]] = [None] * self.height
+            for first_row, last_row in col:
+                for y in range(first_row, last_row):
+                    pixels[y] = self.pixel_pool[pix]
+                    pix += 1
+            self.column_pixels.append(pixels)
+
+    def to_surface_optimized(self):
         surf = pygame.Surface((64, 64))
         pxarray = pygame.PixelArray(surf)
         pix = 0
@@ -394,6 +414,105 @@ class Sprite:
                     pix += 1
         pxarray.close()
         return surf
+
+    def to_surface(self):
+        surf = pygame.Surface((64, 64))
+        pxarray = pygame.PixelArray(surf)
+        pix = 0
+        for x, pixels in enumerate(self.column_pixels):
+            for y, pix in enumerate(pixels):
+                v = 0xFF00FF if pix is None else pix
+                pxarray[self.first_col + x, y] = v  # type: ignore
+        pxarray.close()
+        return surf
+
+    def render_optimized(self, screen: pygame.Surface, x: int, y: int, w: int, h: int):
+        step_x = self.width / w
+        step_y = self.height / h
+
+        pix = 0
+        prev_source_y = None
+
+        for screen_col in range(w):
+            source_col = int(screen_col * step_x)
+            posts = self.column_posts[source_col]
+            for first_row, last_row in posts:
+                for row in range(first_row, last_row):
+                    source_y = int(row * step_y)
+                    print(f"EHM: {pix} / {len(self.pixel_pool)}")
+                    color = self.pixel_pool[pix]
+                    pix += 1
+
+                    screen_y = y + first_row * (h / self.height)
+                    for py in range(row, int(row + step_y * row)):
+                        screen.set_at((int(screen_col + x), int(screen_y)), color)
+
+    def render(self, screen: pygame.Surface, x: int, y: int, w: int, h: int):
+        if y + h < 0 or y >= screen.get_height():
+            return
+        if x + w < 0 or x >= screen.get_width():
+            return
+
+        step_x = self.width / w
+        step_y = self.height / h
+        scr_x = max(x, 0)
+
+        while scr_x - x < w and scr_x < screen.get_width():
+            column = int((scr_x - x) * step_x) - self.first_col
+            if column < 0 or column >= len(self.column_pixels):
+                scr_x += 1
+                continue
+
+            scr_y = max(y, 0)
+
+            while scr_y - y < h and scr_y < screen.get_height():
+                row = int((scr_y - y) * step_y)
+                color = self.column_pixels[column][row]
+                if color is not None:
+                    screen.set_at((scr_x, scr_y), color)
+                scr_y += 1
+
+            scr_x += 1
+
+    def render_with_zbuf(
+        self,
+        screen: pygame.Surface,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        z: float,
+        zbuf: List[float],
+    ):
+        if y + h < 0 or y >= screen.get_height():
+            return
+        if x + w < 0 or x >= screen.get_width():
+            return
+
+        step_x = self.width / w
+        step_y = self.height / h
+        scr_x = max(x, 0)
+
+        while scr_x - x < w and scr_x < screen.get_width():
+            if zbuf[scr_x] > 0 and zbuf[scr_x] <= z:
+                scr_x += 1
+                continue
+
+            column = int((scr_x - x) * step_x) - self.first_col
+            if column < 0 or column >= len(self.column_pixels):
+                scr_x += 1
+                continue
+
+            scr_y = max(y, 0)
+
+            while scr_y - y < h and scr_y < screen.get_height():
+                row = int((scr_y - y) * step_y)
+                color = self.column_pixels[column][row]
+                if color is not None:
+                    screen.set_at((scr_x, scr_y), color)
+                scr_y += 1
+
+            scr_x += 1
 
 
 class Media:

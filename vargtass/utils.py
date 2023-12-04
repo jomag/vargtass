@@ -1,4 +1,5 @@
-from math import cos, pi, sin
+from math import cos, pi, sin, sqrt
+from typing import Self
 
 
 def chunks(lst, n):
@@ -39,5 +40,34 @@ def rotate(x: float, y: float, angle: float):
     return dx, dy
 
 
+class Vec2:
+    def __init__(self, x: float, y: float):
+        self.x = x
+        self.y = y
+
+    def __add__(self, other: "Vec2"):
+        return Vec2(self.x + other.x, self.y + other.y)
+
+    def __sub__(self, other: "Vec2"):
+        return Vec2(self.x - other.x, self.y - other.y)
+
+    def dot(self, other: "Vec2"):
+        return self.x * other.x + self.y * other.y
+
+    def rotate(self, rad: float):
+        return Vec2(
+            cos(rad) * self.x - sin(rad) * self.y,
+            sin(rad) * self.x + cos(rad) * self.y,
+        )
+
+    @property
+    def length(self):
+        return sqrt(self.x**2 + self.y**2)
+
+
 def d2r(degrees: float):
     return degrees * (pi / 180.0)
+
+
+def r2d(radians: float):
+    return radians * (180.0 / pi)

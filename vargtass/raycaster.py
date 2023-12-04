@@ -34,7 +34,7 @@ class Raycaster:
         x, y = self.x, self.y
 
         # Normalized direction vector
-        dx, dy = rotate(0, 1, self.dir)
+        dx, dy = rotate(1, 0, self.dir)
 
         self.hray_step_x = dx * (1 / dy) if dy != 0 else 0
         self.vray_step_y = dy * (1 / dx) if dx != 0 else 0

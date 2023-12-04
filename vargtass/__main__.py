@@ -1,8 +1,10 @@
 import logging
 import os
 
+from vargtass.ui import run_ui
+
 from .game_assets import GameAssets
-from .game import run_game, run_sprite_display, run_wall_display
+from .game import run_sprite_display, run_wall_display
 
 if __name__ == "__main__":
     logging.basicConfig()
@@ -12,6 +14,6 @@ if __name__ == "__main__":
     assets = GameAssets()
     assets.load(assets_path)
 
-    run_game(assets)
     # run_wall_display(assets)
     # run_sprite_display(assets)
+    run_ui(assets)

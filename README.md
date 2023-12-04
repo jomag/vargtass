@@ -28,3 +28,5 @@ draw the sides of a door, rather than the default texture of the tile.
 [Wolfenstein 3D game file specifications](https://vpoupet.github.io/wolfenstein/docs/files.html)
 
 [ModdingWiki](https://moddingwiki.shikadi.net/wiki/GameMaps_Format)
+
+[Lode's Computer Graphics Tutorial](https://lodev.org/cgtutor/raycasting.html)
