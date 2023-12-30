@@ -1,17 +1,17 @@
-from math import atan, cos, floor, pi, sin, sqrt
+from math import acos, atan, atan2, cos, floor, fmod, pi, sin, sqrt
 from typing import Dict, Optional, Set, Tuple
 import pygame
 from array import array
 from vargtass.game_state import GameState
 from vargtass.raycaster import Raycaster
 
-from vargtass.utils import chunks, d2r, rotate
+from vargtass.utils import Vec2, chunks, d2r, r2d, rotate
 
 from .game_assets import GameAssets, Level
 
 
 def render_player(screen: pygame.Surface, x: float, y: float, dir: float):
-    poly = [(-5, -3), (0, 10), (5, -3), (0, 0)]
+    poly = [(-3, -5), (10, 0), (-3, 5), (0, 0)]
     poly = [rotate(c[0], c[1], dir) for c in poly]
     poly = [(c[0] + x, c[1] + y) for c in poly]
 
@@ -54,11 +54,12 @@ def raycast(level: Level, x: float, y: float, dir: float):
     # Shoot two rays in the same direction. One (vray) is examined at every vertical
     # intersection with the grid, and the other one (hray) is examined at every horizontal
     # intersection. The one that hits a wall first is the one we use.
+    # Direction angle 0 will raycast to the east. Angle 90 to the south.
 
     max_distance = 64
 
     # Normalized direction vector
-    dx, dy = rotate(0, 1, dir)
+    dx, dy = rotate(1, 0, dir)
 
     x_per_y_unit = dx * (1 / dy) if dy != 0 else 0
     y_per_x_unit = dy * (1 / dx) if dx != 0 else 0
@@ -141,7 +142,6 @@ def raycast(level: Level, x: float, y: float, dir: float):
 
 
 def projected_distance(dx: float, dy: float, angle: float):
-    angle += pi * 0.5
     return dx * cos(angle) + dy * sin(angle)
 
 
@@ -159,6 +159,8 @@ def render_top_view(
 
     media = state.assets.media
 
+    screen.fill(0x555555)
+
     for x in range(level.width):
         for y in range(level.height):
             wall_index = level.plane0.get_cell(x, y) * 2 - 2
@@ -172,6 +174,21 @@ def render_top_view(
                         (x * grid_size + offs_x, y * grid_size + offs_y),
                     )
 
+    for a in state.actors:
+        try:
+            sprite = state.assets.media.sprites[a.sprite]
+        except KeyError:
+            print("Sprite not found!")
+            continue
+        if sprite:
+            sprite.render(
+                screen,
+                int(a.x * grid_size + offs_x) - grid_size // 2,
+                int(a.y * grid_size + offs_y) - grid_size // 2,
+                grid_size,
+                grid_size,
+            )
+
     raycaster = Raycaster()
 
     fov = pi * 0.125
@@ -181,7 +198,7 @@ def render_top_view(
         if hit:
             distance, tx, _, xy, tile = hit
             x, y = state.player_x * grid_size, state.player_y * grid_size
-            dx, dy = rotate(0, grid_size, dir)
+            dx, dy = rotate(grid_size, 0, dir)
             pygame.draw.line(
                 screen,
                 "green",
@@ -205,13 +222,24 @@ def render_top_view(
 
 
 def render_3d(screen: pygame.Surface, state: GameState):
+    fov = pi * 0.125
+
     level = state.level
     if not level:
         return
 
+    floor_color = 0x707070
+    ceil_color = 0x383838
+
+    sw, sh = screen.get_width(), screen.get_height()
+    screen.fill(ceil_color, (0, 0, sw, sh // 2))
+    screen.fill(floor_color, (0, sh // 2, sw, sh // 2))
+
+    zbuf = [0.0] * screen.get_width()
+
+    # Raycast walls
     raycaster = Raycaster()
     w, h = screen.get_width(), screen.get_height()
-    fov = pi * 0.125
     step = (fov * 2) / w
     for x in range(w):
         dir = state.player_dir - fov + step * x
@@ -227,6 +255,14 @@ def render_3d(screen: pygame.Surface, state: GameState):
                 state.player_dir,
             )
 
+            # Note that we use distance instead of wall height
+            # for the Z-buffer, which is used to determine if
+            # each column of the sprites should be rendered or
+            # not. Wolfenstein use wall height, and the reason
+            # could be that the projected distance is not same
+            # as the real distance.
+            zbuf[x] = max(pdist, 0)
+
             if pdist > 0:
                 wh = h / (pdist or 1) * 0.5
                 y1 = h / 2 - wh
@@ -241,106 +277,59 @@ def render_3d(screen: pygame.Surface, state: GameState):
                     tx,
                 )
 
+    # Render actors
 
-def run_game(assets: GameAssets):
-    width = 512
-    height = 512
+    # TODO: better algo to find visible actors/sprites (4.7.8.1)
+    all_actors = [actor for actor in state.actors]
+    visible_actors = []
 
-    floor_color = 0x707070
-    ceil_color = 0x383838
+    for a in all_actors:
+        rel = Vec2(a.x - state.player_x, a.y - state.player_y)
+        rel = rel.rotate(-state.player_dir)
+        if rel.length == 0:
+            continue
 
-    pygame.init()
-    screen = pygame.display.set_mode((width, height))
-    clock = pygame.time.Clock()
-    running = True
+        x_axis = Vec2(1, 0)
+        axis_angle = acos(rel.dot(x_axis) / (rel.length))
+        angle = axis_angle
+        if rel.y < 0:
+            angle = -angle
 
-    move_speed = 0.08
-    rot_speed = 0.02
+        # TODO: Try this instead!!
+        angle = atan2(rel.y, rel.x)
 
-    state = GameState(assets)
-    state.enter_level(0)
-    mode = "top"
+        # if angle < fov:
+        center_x = w / 2 + (w / (fov * 2)) * angle
+        # else:
+        # continue
 
-    if state.level:
-        spawn = state.level.get_player_spawn()
-        state.player_x = spawn[0][0] + 0.5
-        state.player_y = spawn[0][1] + 0.5
-        state.player_dir = (spawn[1] + 180) * pi / 180
+        pdist = projected_distance(
+            a.x - state.player_x, a.y - state.player_y, state.player_dir
+        )
 
-    def handle_door_trigger():
-        level = state.level
-        if level:
-            rc = Raycaster()
-            hit = rc.raycast(
-                state,
-                level,
-                state.player_x,
-                state.player_y,
-                state.player_dir,
-                door_is_solid=True,
+        # FIXME: Without this, there's a lot of flickering
+        # from sprites not in front of the player, but directly
+        # to the left/right side of the player. And 0.1 does not
+        # seem to be enough to get rid of *all* the flickering.
+        if pdist < 0.1:
+            continue
+
+        visible_actors.append((a, center_x, pdist))
+
+    visible_actors = reversed(sorted(visible_actors, key=lambda a: a[2]))
+
+    for a, center_x, pdist in visible_actors:
+        sz = h / (pdist or 1)
+        top = h / 2 - sz / 2
+        left = center_x - sz / 2
+
+        try:
+            sprite = state.assets.media.sprites[a.sprite]
+            sprite.render_with_zbuf(
+                screen, int(left), int(top), int(sz), int(sz), pdist, zbuf
             )
-            if hit:
-                _, _, _, _, tile = hit
-                if tile.is_door:
-                    state.toggle_door(tile.door_id)
-
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_TAB:
-                    mode = "top" if mode == "3d" else "3d"
-                if event.key == pygame.K_t:
-                    level = state.level
-                    if level is not None:
-                        rc = Raycaster()
-                        rc.raycast(
-                            state,
-                            level,
-                            state.player_x,
-                            state.player_y,
-                            state.player_dir,
-                        )
-                if event.key == pygame.K_SPACE:
-                    handle_door_trigger()
-            if event.type == pygame.QUIT:
-                running = False
-
-        px, py = state.player_x, state.player_y
-        level = state.level
-
-        pressed = pygame.key.get_pressed()
-        if pressed[pygame.K_a]:
-            state.player_dir -= rot_speed
-        if pressed[pygame.K_d]:
-            state.player_dir += rot_speed
-        if pressed[pygame.K_w]:
-            dx, dy = rotate(0, move_speed, state.player_dir)
-            if level:
-                if state.is_walkable(int(state.player_x + dx), int(state.player_y)):
-                    state.player_x += dx
-                if state.is_walkable(int(state.player_x), int(state.player_y + dy)):
-                    state.player_y += dy
-        if pressed[pygame.K_s]:
-            dx, dy = rotate(0, -move_speed, state.player_dir)
-            if level:
-                if state.is_walkable(int(state.player_x + dx), int(state.player_y)):
-                    state.player_x += dx
-                if state.is_walkable(int(state.player_x), int(state.player_y + dy)):
-                    state.player_y += dy
-
-        screen.fill(ceil_color, (0, 0, width, height // 2))
-        screen.fill(floor_color, (0, height // 2, width, height // 2))
-
-        if mode == "top":
-            render_top_view(screen, state, (state.player_x, state.player_y))
-        else:
-            render_3d(screen, state)
-
-        pygame.display.flip()
-        state.step()
-        clock.tick(60)
-
-    pygame.quit()
+        except KeyError:
+            print(f"Sprite not found: {a.sprite}")
 
 
 def run_wall_display(assets: GameAssets):
@@ -364,6 +353,52 @@ def run_wall_display(assets: GameAssets):
 
     while running:
         for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+        clock.tick(60)
+    pygame.quit()
+
+
+def run_sprite_display(assets: GameAssets):
+    pygame.init()
+
+    margin = 16
+    w, h = 512, 512
+
+    screen = pygame.display.set_mode((w + margin * 2, h + margin * 2))
+    clock = pygame.time.Clock()
+    running = True
+
+    # for i, idx in enumerate(assets.media.walls):
+    #     wall = assets.media.get_wall_surface(idx)
+    #     if wall:
+    #         x = i % per_row
+    #         y = i // per_row
+    #         screen.blit(wall, (x * 74 + 10, y * 74 + 10))
+
+    sprite_index = 0
+
+    def render_sprite(index):
+        screen.fill("black")
+
+        sprite = assets.media.get_sprite_surface(index)
+        if sprite:
+            scaled = pygame.transform.scale(sprite, (512, 512))
+            screen.blit(scaled, (margin, margin, w, h))
+
+        pygame.display.flip()
+
+    render_sprite(sprite_index)
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RIGHT:
+                    sprite_index += 1
+                    render_sprite(sprite_index)
+                if event.key == pygame.K_LEFT:
+                    sprite_index -= 1
+                    render_sprite(sprite_index)
             if event.type == pygame.QUIT:
                 running = False
         clock.tick(60)

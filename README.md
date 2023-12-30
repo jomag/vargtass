@@ -29,4 +29,4 @@ draw the sides of a door, rather than the default texture of the tile.
 
 [ModdingWiki](https://moddingwiki.shikadi.net/wiki/GameMaps_Format)
 
-
+[Lode's Computer Graphics Tutorial](https://lodev.org/cgtutor/raycasting.html)
