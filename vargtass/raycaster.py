@@ -1,4 +1,6 @@
 from math import floor, sqrt
+import math
+from typing import Optional
 from vargtass.game_state import GameState
 from vargtass.game_assets import Level
 from vargtass.utils import rotate
@@ -36,21 +38,26 @@ class Raycaster:
         # Normalized direction vector
         dx, dy = rotate(1, 0, self.dir)
 
-        self.hray_step_x = dx * (1 / dy) if dy != 0 else 0
-        self.vray_step_y = dy * (1 / dx) if dx != 0 else 0
+        # How many X units the ray moves for each 1 unit step along Y axis.
+        # If dy is zero, there will be no hits on horizontal walls.
+        self.hray_step_x = dx / dy if dy != 0 else math.inf
+
+        # How many Y units the ray moves for each 1 unit step along X axis
+        # If dx is zero, there will be no hits on vertical walls.
+        self.vray_step_y = dy / dx if dx != 0 else math.inf
 
         # How much longer the ray gets for each unit step along the X axis
-        self.vray_step_length = sqrt(1 + (dy / dx) ** 2) if dx != 0 else 0
+        self.vray_step_length = sqrt(1 + (dy / dx) ** 2) if dx != 0 else math.inf
 
         # How much longer the ray gets for each unit step along the Y axis
-        self.hray_step_length = sqrt(1 + (dx / dy) ** 2) if dy != 0 else 0
+        self.hray_step_length = sqrt(1 + (dx / dy) ** 2) if dy != 0 else math.inf
 
         if dx < 0:
             self.vray_step_x = -1
             self.vray_length = (x % 1) * self.vray_step_length
             self.vray_x = floor(x)
             self.vray_y = y - (x % 1) * self.vray_step_y
-        else:
+        elif dx > 0:
             self.vray_step_x = 1
             self.vray_length = (1.0 - x % 1) * self.vray_step_length
             self.vray_x = floor(x + 1)
