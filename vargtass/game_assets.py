@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import Enum, IntEnum
 import logging
 import os
 import time
@@ -7,6 +8,46 @@ from typing import List, Optional, Tuple
 import pygame
 
 from .utils import chunks, print_header, print_hex
+
+
+class BlockingObjects(IntEnum):
+    GREEN_BARREL = 24
+    TABLE_AND_CHAIRS = 25
+    FLOOR_LAMP = 26
+    HANGED_SKELETON = 28
+    WHITE_PILLAR = 30
+    TREE = 31
+    SINK = 33
+    POTTED_PLANT = 34
+    URN = 35
+    BARE_TABLE = 36
+    SUIT_OF_ARMOR = 39
+    HANGING_CAGE = 40
+    SKELETON_IN_CAGE = 41
+    BED = 45
+    BARREL = 58
+    WELL = 59
+    EMPTY_WELL = 60
+    FLAG = 62
+    CALL_APOGEE = 63
+    STOVE = 68
+    SPEARS = 69
+
+
+class CollectibleType(IntEnum):
+    DOG_FOOD = 29
+    KEY_GOLD = 43
+    KEY_SILVER = 44
+    FOOD = 47
+    MEDKIT = 48
+    AMMO = 49
+    MACHINE_GUN = 50
+    CHAIN_GUN = 51
+    TREASURE_CROSS = 52
+    TREASURE_CHALICE = 53
+    TREASURE_CHEST = 54
+    TREASURE_CROWN = 55
+    LIFE_UP = 56
 
 
 def to_u16(data: bytes, offset: int = 0):
@@ -179,16 +220,9 @@ class Plane1(Plane):
 class Plane2(Plane):
     """Plane 2 contains props"""
 
-    # fmt: off
-    blocking = [
-        24, 25, 26, 28, 30, 31, 33, 34, 35, 36, 39,
-        40, 41, 45, 58, 59, 60, 62, 63, 68, 69
-    ]
-    # fmt: on
-
     def print(self):
         def to_char(n: int):
-            if n in self.blocking:
+            if n in list(BlockingObjects):
                 return "B"
             return "."
 
