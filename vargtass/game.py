@@ -174,7 +174,10 @@ def render_top_view(
                         (x * grid_size + offs_x, y * grid_size + offs_y),
                     )
 
-    for a in state.actors:
+    all_objects = [obj for obj in state.static_objects]
+    all_objects.extend([c for c in state.collectibles if not c.collected])
+
+    for a in all_objects:
         try:
             sprite = state.assets.media.sprites[a.sprite]
         except KeyError:
@@ -280,10 +283,11 @@ def render_3d(screen: pygame.Surface, state: GameState):
     # Render actors
 
     # TODO: better algo to find visible actors/sprites (4.7.8.1)
-    all_actors = [actor for actor in state.actors]
-    visible_actors = []
+    all_objects = [actor for actor in state.static_objects]
+    all_objects.extend([obj for obj in state.collectibles if not obj.collected])
+    visible_objects = []
 
-    for a in all_actors:
+    for a in all_objects:
         rel = Vec2(a.x - state.player_x, a.y - state.player_y)
         rel = rel.rotate(-state.player_dir)
         if rel.length == 0:
@@ -314,11 +318,11 @@ def render_3d(screen: pygame.Surface, state: GameState):
         if pdist < 0.1:
             continue
 
-        visible_actors.append((a, center_x, pdist))
+        visible_objects.append((a, center_x, pdist))
 
-    visible_actors = reversed(sorted(visible_actors, key=lambda a: a[2]))
+    visible_objects = reversed(sorted(visible_objects, key=lambda a: a[2]))
 
-    for a, center_x, pdist in visible_actors:
+    for a, center_x, pdist in visible_objects:
         sz = h / (pdist or 1)
         top = h / 2 - sz / 2
         left = center_x - sz / 2
@@ -395,9 +399,11 @@ def run_sprite_display(assets: GameAssets):
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RIGHT:
                     sprite_index += 1
+                    print(f"Sprite {sprite_index}")
                     render_sprite(sprite_index)
                 if event.key == pygame.K_LEFT:
                     sprite_index -= 1
+                    print(f"Sprite {sprite_index}")
                     render_sprite(sprite_index)
             if event.type == pygame.QUIT:
                 running = False
